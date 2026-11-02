@@ -19,7 +19,7 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .. import antibot, spamscore
-from ..actions import MARKER_NAMES, log, spam_ban
+from ..actions import MARKER_NAMES, delete_recent, log, spam_ban
 from ..db import db
 from ..texts import t
 from ..utils import MUTED, can_restrict, default_permissions, user_mention
@@ -119,11 +119,13 @@ async def assess(bot: Bot, m: Message, s: dict, edited: bool) -> Verdict:
 
 # --- карточки для админов ---
 class Rev(CallbackData, prefix="rv"):
-    """a: ban — это бот, забанить; ok — это человек, размутить/разбанить; c — чат; u — участник; r — запись."""
+    """a: ban — это бот, забанить; ok — это человек, размутить/разбанить; c — чат; u — участник; r — запись;
+    m — само подозрительное сообщение, если оно ещё в чате."""
     a: str
     c: int
     u: int
     r: int = 0
+    m: int = 0
 
 
 _texts = {}  # номер карточки -> (текст сообщения, id метки), чтобы кнопка могла дообучить словарь
@@ -176,7 +178,7 @@ async def punish(bot: Bot, m: Message, v: Verdict):
         _reported[key] = time.time()
         text = await t(chat.id, "guard.report", user=who, reasons=_why(v), message=_quote(m))
         rows = [[InlineKeyboardButton(text=await t(chat.id, "guard.btn_ban"),
-                                      callback_data=Rev(a="ban", c=chat.id, u=user.id, r=rid).pack()),
+                                      callback_data=Rev(a="ban", c=chat.id, u=user.id, r=rid, m=m.message_id).pack()),
                  InlineKeyboardButton(text=await t(chat.id, "guard.btn_ok"),
                                       callback_data=Rev(a="ok", c=chat.id, u=user.id, r=rid).pack())]]
     await log(bot, chat, text, InlineKeyboardMarkup(inline_keyboard=rows), fallback_to_owners=True)
@@ -194,6 +196,7 @@ async def on_review(cb: CallbackQuery, callback_data: Rev, bot: Bot):
     try:
         if d.a == "ban":
             await bot.ban_chat_member(d.c, d.u, revoke_messages=True)
+            await delete_recent(bot, d.c, d.u, [d.m])
             await spamscore.learn(text, spam=True)
             done = await t(d.c, "guard.done_ban")
         else:

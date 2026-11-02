@@ -75,14 +75,20 @@ async def warn(bot: Bot, chat: Chat, uid: int, name: str, reason="", by=None, th
                      "лимит предупреждений", thread=thread)
 
 
+async def delete_recent(bot: Bot, chat_id: int, uid: int, extra_ids=()) -> list[int]:
+    """Удаляет сообщения человека, которые бот видел за 48 часов. Бан сам их в супергруппе не удаляет."""
+    ids = sorted(set(antibot.recent(chat_id, uid)) | {i for i in extra_ids if i})
+    for i in range(0, len(ids), 100):
+        with suppress(TelegramAPIError):
+            await bot.delete_messages(chat_id, ids[i:i + 100])
+    return ids
+
+
 async def spam_ban(bot: Bot, chat: Chat, uid: int, name: str, extra_ids=(), reason="спам-бот", by=None,
                    log_it=True) -> int:
     """Бан навсегда + удаление всех его сообщений, которые бот видел за последние 48 часов."""
     await bot.ban_chat_member(chat.id, uid, revoke_messages=True)
-    ids = sorted(set(antibot.recent(chat.id, uid)) | set(extra_ids))
-    for i in range(0, len(ids), 100):
-        with suppress(TelegramAPIError):
-            await bot.delete_messages(chat.id, ids[i:i + 100])
+    ids = await delete_recent(bot, chat.id, uid, extra_ids)
     if log_it:
         await log(bot, chat, f"🤖 {name} забанен(а) как спам-бот, удалено сообщений: {len(ids)}"
                   + await reason_line(chat.id, reason) + await admin_line(chat.id, by))
