@@ -49,7 +49,10 @@ def user_mention(user: User) -> str:
 
 
 def thread_of(message: Message):
-    return message.message_thread_id if message.is_topic_message else None
+    # у эфемерной команды из меню признак «сообщение в теме» может не прийти — тогда верим номеру темы
+    if message.is_topic_message or (message.ephemeral_message_id and message.chat.is_forum):
+        return message.message_thread_id
+    return None
 
 
 _known_users = {}

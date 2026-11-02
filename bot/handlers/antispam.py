@@ -94,6 +94,11 @@ async def tell_author(bot: Bot, m: Message, text: str, short_key: str, kind: str
         log.warning("Не удалось предупредить автора: %s", e)
 
 
+def _is_command(m: Message) -> bool:
+    text = m.text or ""
+    return len(text) > 1 and text[0] in "/!" and text[1] not in " /!"
+
+
 class Antispam(BaseMiddleware):
     """Проверяет каждое сообщение в группе до того, как его увидят остальные обработчики."""
 
@@ -121,6 +126,11 @@ class Antispam(BaseMiddleware):
             return await handler(event, data)
 
         action, reason, extra_ids = verdict
+        if action in ("slow", "noreply") and _is_command(event):
+            # команду в медленной теме тихо убираем, но отвечаем на неё: ответ всё равно увидит только автор
+            with suppress(TelegramAPIError):
+                await bot.delete_message(event.chat.id, event.message_id)
+            return await handler(event, data)
         try:
             if action == "guard":
                 return await guard.punish(bot, event, reason)

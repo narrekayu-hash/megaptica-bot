@@ -29,15 +29,23 @@ async def answer_privately(bot: Bot, message: Message, data: str, link_payload: 
     user = message.from_user
     if not user:
         return
+    where = f"чат {message.chat.id}, тема {thread_of(message)}, участник {user.id}, из меню: {bool(eph_id)}"
+    # ответ на эфемерную команду возможен только 15 секунд — если не вышло, шлём просто эфемерное в тему
+    for reply in ([eph_id, None] if eph_id else [None]):
+        try:
+            await send_content(bot, message.chat.id, data, thread=thread_of(message),
+                               only_for=user.id, reply_to_ephemeral=reply)
+            return log.info("Личный ответ показан в чате (%s)", where)
+        except TelegramAPIError as e:
+            log.warning("Эфемерный ответ не отправился (%s): %s", where, e)
     try:
-        return await send_content(bot, message.chat.id, data, thread=thread_of(message),
-                                  only_for=user.id, reply_to_ephemeral=eph_id)
-    except TelegramAPIError as e:
-        log.info("Эфемерный ответ не отправился, пробую ЛС: %s", e)
-    try:
-        return await send_content(bot, user.id, data)
+        await send_content(bot, user.id, data)
+        return log.info("Личный ответ отправлен в ЛС (%s)", where)
     except TelegramForbiddenError:
         pass  # человек ещё ни разу не писал боту — Telegram не даёт написать первым
+    except TelegramAPIError as e:
+        log.warning("Ответ в ЛС не отправился (%s): %s", where, e)
+    log.info("Показываю кнопку «Получить ответ» (%s)", where)
     me = await bot.me()
     button = InlineKeyboardButton(text=await t(message.chat.id, "cmd.dm_button"),
                                   url=f"https://t.me/{me.username}?start={link_payload}")

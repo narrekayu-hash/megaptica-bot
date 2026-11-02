@@ -203,54 +203,17 @@ async def reaction(chat_id: int, message_id: int, reactor: User | None, added: b
     return author if (total or 0) >= STAR_REACTIONS else None
 
 
-async def progress(chat_id: int, uid: int, s: dict) -> dict[str, int]:
-    """Насколько человек близок к ачивкам со счётчиком."""
-    today = _today(s)
-    helps = await db.help_count(chat_id, uid)
-    top3 = await db.seen_count(chat_id, uid, "top3")
-    return {
-        "wings": await db.seen_count(chat_id, uid, "topic"),
-        "flame": await db.seen_count(chat_id, uid, "day", (today - timedelta(days=29)).isoformat()),
-        "oldtimer": await _days_in_chat(chat_id, uid),
-        "elder": helps, "keeper": helps, "thrice": top3,
-        "hand": await db.seen_count(chat_id, uid, "friend"),
-        "fire": await _streak(chat_id, uid, "chatday", today),
-        "photo": await db.seen_count(chat_id, uid, "photo"),
-    }
-
-
 async def collection_text(chat_id: int, uid: int, name: str, own: bool) -> str:
+    """Только полученные ачивки: список того, что ещё не получено, не показываем — их добывают сами."""
     s = await settings.get(chat_id)
     if not s["achievements"]:
         return await t(chat_id, "ach.off")
     cat = {a.code: a for a in catalog(s)}
     have = [cat[r["code"]] for r in await db.ach_of(chat_id, uid) if r["code"] in cat]
-    got = {a.code for a in have}
-    open_ = [a for a in enabled(s).values() if a.kind != "secret"]
-    secrets = [a for a in enabled(s).values() if a.kind == "secret"]
-    who = "Твои ачивки" if own else f"Ачивки {mention(uid, name)}"
-    lines = [f"🏆 <b>{who}</b>: {len(have)}"]
-    if not own:
-        lines += [f"✅ {a.title} — {a.desc}" for a in have] or ["Пока ни одной."]
-        return "\n".join(lines)
-    prog = await progress(chat_id, uid, s)
-    for title, kinds in (("", ("auto",)), ("\n🎖 <b>Выдают админы</b>", ("manual",))):
-        if title:
-            lines.append(title)
-        for a in open_:
-            if a.kind not in kinds:
-                continue
-            if a.code in got:
-                lines.append(f"✅ {a.title}")
-            else:
-                unit = " дней" if a.code == "oldtimer" else ""
-                count = f" ({min(prog[a.code], a.need)}/{a.need}{unit})" if a.need > 1 and a.code in prog else ""
-                lines.append(f"▫️ {a.title} — {a.desc}{count}")
-    if secrets:
-        found = [a for a in secrets if a.code in got]
-        lines.append(f"\n❓ <b>Секретные</b>: найдено {len(found)} из {len(secrets)}")
-        lines += [f"✅ {a.title} — {a.desc}" for a in found]
-    return "\n".join(lines)
+    if not have:
+        return await t(chat_id, "ach.none" if own else "ach.none_other", user=mention(uid, name))
+    head = await t(chat_id, "ach.mine" if own else "ach.other", user=mention(uid, name), count=str(len(have)))
+    return "\n".join([head] + [f"✅ <b>{a.title}</b> — {a.desc}" for a in have])
 
 
 async def congrats(chat_id: int, items: list[Ach]) -> str:
