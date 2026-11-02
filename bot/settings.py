@@ -24,6 +24,7 @@ FIELDS = {
     "autoban_days": ("Новичок — первые, дней", "int", (0, 365)),
     "spam_level": ("Строгость", "enum", {"soft": "мягко", "normal": "обычно", "strict": "строго"}),
     "cas": ("Проверять по базе CAS", "bool", None),
+    "old_delete": ("Давним: удалять от, баллов", "int", (0, 100)),
     "antilink": ("Запрет ссылок", "bool", None),
     "link_whitelist": ("Разрешённые сайты", "list", None),
     "antiforward": ("Запрет пересылок", "bool", None),
@@ -102,6 +103,7 @@ DEFAULTS = {
     "autoban_days": 3,
     "spam_level": "normal",
     "cas": True,
+    "old_delete": 15,
     "achievements": True,
     "texts": {},          # ключ текста -> свой вариант (см. bot/texts.py)
     "panel_users": {},    # кому владелец дал доступ к панели: id (строкой) -> имя
@@ -138,9 +140,11 @@ HINTS = {
     "autoban": "бот складывает баллы подозрительности: пересылка от бота с кнопками, .apk, «шрифты», "
                "«вбей бота в поиске», заработок с «пиши в лс», 18+ в канале профиля, метки /бот и т. п. "
                "Много баллов у новичка — бан, средне — удалить, мут на сутки и карточка админам «Бот / Человек». "
-               "Давних участников бот никогда не банит сам",
+               "Давних участников бот никогда не банит сам, а при очень высоких баллах только удаляет сообщение",
     "autoban_days": "кто в чате меньше стольких дней, считается новичком (0 — все). Кто был в чате до запуска бота, "
                     "считается давним участником",
+    "old_delete": "если у сообщения давнего участника столько баллов или больше, бот удаляет сообщение и присылает "
+                  "карточку, но самого участника не наказывает (0 — никогда не удалять)",
     "spam_level": "мягко — банит только совсем очевидных ботов, строго — банит и присылает карточки раньше",
     "cas": "спрашивать общую базу спамеров CAS, не забанен ли новичок в других чатах (бот отправляет туда только ID)",
     "spam_action": "наказание за ссылку или пересылку",
@@ -179,7 +183,7 @@ HINTS = {
 
 SECTIONS = {
     "mod": ("🛡 Модерация", ["warn_limit", "warn_action", "mute_minutes", "log_chat"]),
-    "spam": ("🚫 Антиспам", ["autoban", "autoban_days", "spam_level", "cas", "antiflood", "flood_limit", "flood_seconds", "flood_action", "antilink",
+    "spam": ("🚫 Антиспам", ["autoban", "autoban_days", "spam_level", "cas", "old_delete", "antiflood", "flood_limit", "flood_seconds", "flood_action", "antilink",
                             "link_whitelist", "antiforward", "antichannel", "spam_action", "stopwords",
                             "stop_action"]),
     "new": ("👋 Новички", ["captcha", "captcha_seconds", "welcome", "welcome_text", "rules", "clean_service"]),

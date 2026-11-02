@@ -40,6 +40,7 @@ class Verdict:
     reasons: list = field(default_factory=list)
     newcomer: bool = False
     marker_id: int = 0
+    delete: bool = False        # для report: баллов так много, что сообщение давнего участника удаляется
 
 
 # --- профиль и база CAS (только для новичков, с кэшем) ---
@@ -114,7 +115,8 @@ async def assess(bot: Bot, m: Message, s: dict, edited: bool) -> Verdict:
         action = "report" if score >= ban else "ok"
         if score < 3 and not edited:
             await spamscore.learn(text, spam=False)  # обычное сообщение давнего участника — пример нормы
-    return Verdict(action, score, reasons, newcomer, marker_id)
+    delete = not newcomer and 0 < s["old_delete"] <= score
+    return Verdict(action, score, reasons, newcomer, marker_id, delete)
 
 
 # --- карточки для админов ---
@@ -171,14 +173,19 @@ async def punish(bot: Bot, m: Message, v: Verdict):
                                       callback_data=Rev(a="ban", c=chat.id, u=user.id, r=rid).pack()),
                  InlineKeyboardButton(text=await t(chat.id, "guard.btn_human"),
                                       callback_data=Rev(a="ok", c=chat.id, u=user.id, r=rid).pack())]]
-    else:  # report: давний участник, бот его не трогает
+    else:  # report: давний участник — не наказываем, но при очень высоких баллах убираем сообщение
+        if v.delete:
+            with suppress(TelegramAPIError):
+                await bot.delete_messages(chat.id, [m.message_id])
         key = (chat.id, user.id)
         if time.time() - _reported.get(key, 0) < 3600:
             return
         _reported[key] = time.time()
-        text = await t(chat.id, "guard.report", user=who, reasons=_why(v), message=_quote(m))
+        text = await t(chat.id, "guard.report_deleted" if v.delete else "guard.report", user=who, reasons=_why(v),
+                       message=_quote(m))
         rows = [[InlineKeyboardButton(text=await t(chat.id, "guard.btn_ban"),
-                                      callback_data=Rev(a="ban", c=chat.id, u=user.id, r=rid, m=m.message_id).pack()),
+                                      callback_data=Rev(a="ban", c=chat.id, u=user.id, r=rid,
+                                                          m=0 if v.delete else m.message_id).pack()),
                  InlineKeyboardButton(text=await t(chat.id, "guard.btn_ok"),
                                       callback_data=Rev(a="ok", c=chat.id, u=user.id, r=rid).pack())]]
     await log(bot, chat, text, InlineKeyboardMarkup(inline_keyboard=rows), fallback_to_owners=True)

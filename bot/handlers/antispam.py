@@ -164,7 +164,7 @@ class Antispam(BaseMiddleware):
             antibot.remember(chat.id, user.id, m.message_id)
         if s["autoban"]:
             v = await guard.assess(bot, m, s, self.edited)
-            if v.action in ("ban", "review"):
+            if v.action in ("ban", "review") or v.delete:
                 return "guard", v, []
             if v.action == "report":
                 await guard.punish(bot, m, v)
