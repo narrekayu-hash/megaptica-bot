@@ -204,8 +204,8 @@ async def _moderate(message: Message, bot: Bot, cmd: str, args: str, plain: bool
             learned = await antibot.learn(reply, s["link_whitelist"])
             await spamscore.learn(spamscore.text_of(reply), spam=True)
         ids = [message.message_id] + ([reply.message_id] if reply else [])
-        n = await spam_ban(bot, chat, uid, name, ids, "помечен(а) командой /бот", by)
-        report = await t(chat.id, "mod.spambot", user=name, deleted=n, markers=learned)
+        n, problem = await spam_ban(bot, chat, uid, name, ids, "помечен(а) командой /бот", by)
+        report = await t(chat.id, "mod.spambot", user=name, deleted=n, markers=learned) + problem
         try:
             await bot.send_message(chat.id, report, message_thread_id=thread,
                                    ephemeral_message_parameters=ephemeral(message.from_user.id))

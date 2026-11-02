@@ -19,7 +19,7 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .. import antibot, spamscore
-from ..actions import MARKER_NAMES, delete_recent, log, spam_ban
+from ..actions import MARKER_NAMES, delete_recent, log, remove, spam_ban
 from ..db import db
 from ..texts import t
 from ..utils import MUTED, can_restrict, default_permissions, user_mention
@@ -158,31 +158,28 @@ async def punish(bot: Bot, m: Message, v: Verdict):
     rid = _remember(spamscore.text_of(m), v.marker_id)
     who = f"{user_mention(user)} (ID <code>{user.id}</code>)"
     if v.action == "ban":
-        n = await spam_ban(bot, chat, user.id, user_mention(user), [m.message_id], log_it=False)
+        n, problem = await spam_ban(bot, chat, user.id, user_mention(user), [m.message_id], log_it=False)
         await spamscore.learn(spamscore.text_of(m), spam=True)
-        text = await t(chat.id, "guard.ban", user=who, deleted=n, reasons=_why(v), message=_quote(m))
+        text = await t(chat.id, "guard.ban", user=who, deleted=n, reasons=_why(v), message=_quote(m)) + problem
         rows = [[InlineKeyboardButton(text=await t(chat.id, "guard.btn_unban"),
                                       callback_data=Rev(a="ok", c=chat.id, u=user.id, r=rid).pack())]]
     elif v.action == "review":
-        with suppress(TelegramAPIError):
-            await bot.delete_messages(chat.id, [m.message_id])
+        problem = await remove(bot, chat.id, [m.message_id])
         with suppress(TelegramAPIError):
             await bot.restrict_chat_member(chat.id, user.id, MUTED, until_date=timedelta(seconds=REVIEW_MUTE))
-        text = await t(chat.id, "guard.review", user=who, reasons=_why(v), message=_quote(m))
+        text = await t(chat.id, "guard.review", user=who, reasons=_why(v), message=_quote(m)) + problem
         rows = [[InlineKeyboardButton(text=await t(chat.id, "guard.btn_ban"),
                                       callback_data=Rev(a="ban", c=chat.id, u=user.id, r=rid).pack()),
                  InlineKeyboardButton(text=await t(chat.id, "guard.btn_human"),
                                       callback_data=Rev(a="ok", c=chat.id, u=user.id, r=rid).pack())]]
     else:  # report: давний участник — не наказываем, но при очень высоких баллах убираем сообщение
-        if v.delete:
-            with suppress(TelegramAPIError):
-                await bot.delete_messages(chat.id, [m.message_id])
+        problem = await remove(bot, chat.id, [m.message_id]) if v.delete else ""
         key = (chat.id, user.id)
         if time.time() - _reported.get(key, 0) < 3600:
             return
         _reported[key] = time.time()
         text = await t(chat.id, "guard.report_deleted" if v.delete else "guard.report", user=who, reasons=_why(v),
-                       message=_quote(m))
+                       message=_quote(m)) + problem
         rows = [[InlineKeyboardButton(text=await t(chat.id, "guard.btn_ban"),
                                       callback_data=Rev(a="ban", c=chat.id, u=user.id, r=rid,
                                                           m=0 if v.delete else m.message_id).pack()),
@@ -202,10 +199,10 @@ async def on_review(cb: CallbackQuery, callback_data: Rev, bot: Bot):
     text, marker_id = _texts.pop(d.r, ("", 0))
     try:
         if d.a == "ban":
+            _, problem = await delete_recent(bot, d.c, d.u, [d.m])
             await bot.ban_chat_member(d.c, d.u, revoke_messages=True)
-            await delete_recent(bot, d.c, d.u, [d.m])
             await spamscore.learn(text, spam=True)
-            done = await t(d.c, "guard.done_ban")
+            done = await t(d.c, "guard.done_ban") + problem
         else:
             await bot.unban_chat_member(d.c, d.u, only_if_banned=True)
             with suppress(TelegramAPIError):  # если человек уже не в чате, снимать мут не с кого

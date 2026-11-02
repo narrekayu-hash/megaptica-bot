@@ -75,24 +75,48 @@ async def warn(bot: Bot, chat: Chat, uid: int, name: str, reason="", by=None, th
                      "лимит предупреждений", thread=thread)
 
 
-async def delete_recent(bot: Bot, chat_id: int, uid: int, extra_ids=()) -> list[int]:
+async def remove(bot: Bot, chat_id: int, ids) -> str:
+    """Удаляет сообщения. Возвращает пустую строку или пояснение для админов, почему не вышло."""
+    ids = sorted({i for i in ids if i})
+    try:
+        for i in range(0, len(ids), 100):
+            await bot.delete_messages(chat_id, ids[i:i + 100])
+        return ""
+    except TelegramAPIError as e:
+        log_.warning("Пакетное удаление не прошло, удаляю по одному: %s", e)
+    error = ""
+    for i in ids:  # запасной путь: по одному, чтобы одно «плохое» сообщение не мешало остальным
+        try:
+            await bot.delete_message(chat_id, i)
+        except TelegramAPIError as e:
+            if "not found" not in e.message.lower():  # уже удалённое — не ошибка
+                error = e.message
+    if not error:
+        return ""
+    log_.warning("Не удалось удалить сообщения %s в %s: %s", ids, chat_id, error)
+    return f"\n⚠️ Сообщение не удалилось, Telegram ответил: <code>{escape(error)}</code>"
+
+
+async def delete_recent(bot: Bot, chat_id: int, uid: int, extra_ids=()) -> tuple[list[int], str]:
     """Удаляет сообщения человека, которые бот видел за 48 часов. Бан сам их в супергруппе не удаляет."""
     ids = sorted(set(antibot.recent(chat_id, uid)) | {i for i in extra_ids if i})
-    for i in range(0, len(ids), 100):
-        with suppress(TelegramAPIError):
-            await bot.delete_messages(chat_id, ids[i:i + 100])
-    return ids
+    return ids, await remove(bot, chat_id, ids)
 
 
 async def spam_ban(bot: Bot, chat: Chat, uid: int, name: str, extra_ids=(), reason="спам-бот", by=None,
-                   log_it=True) -> int:
-    """Бан навсегда + удаление всех его сообщений, которые бот видел за последние 48 часов."""
+                   log_it=True) -> tuple[int, str]:
+    """Бан навсегда + удаление всех его сообщений, которые бот видел за последние 48 часов.
+
+    Возвращает, сколько сообщений удалено, и пояснение, если удалить не вышло.
+    """
+    # сначала удаляем, потом баним: так спам исчезает сразу и не зависит от того, что Telegram делает при бане
+    ids, problem = await delete_recent(bot, chat.id, uid, extra_ids)
     await bot.ban_chat_member(chat.id, uid, revoke_messages=True)
-    ids = await delete_recent(bot, chat.id, uid, extra_ids)
+    n = 0 if problem else len(ids)
     if log_it:
-        await log(bot, chat, f"🤖 {name} забанен(а) как спам-бот, удалено сообщений: {len(ids)}"
-                  + await reason_line(chat.id, reason) + await admin_line(chat.id, by))
-    return len(ids)
+        await log(bot, chat, f"🤖 {name} забанен(а) как спам-бот, удалено сообщений: {n}"
+                  + await reason_line(chat.id, reason) + await admin_line(chat.id, by) + problem)
+    return n, problem
 
 
 class Undo(CallbackData, prefix="undo"):
