@@ -15,7 +15,7 @@ from . import spamscore
 from .handlers import achievements, captcha, guard, helpers, sky
 
 UPDATES = ["message", "edited_message", "callback_query", "chat_member", "my_chat_member",
-           "message_reaction", "message_reaction_count"]
+           "message_reaction", "message_reaction_count", "channel_post", "edited_channel_post"]
 
 
 async def on_error(event: ErrorEvent):

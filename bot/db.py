@@ -52,6 +52,17 @@ CREATE INDEX IF NOT EXISTS seen_ref ON seen(chat_id, kind, ref);
 CREATE TABLE IF NOT EXISTS words(
     token TEXT PRIMARY KEY, spam INTEGER NOT NULL DEFAULT 0, ham INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS reposts(
+    channel_id INTEGER, post_id INTEGER, chat_id INTEGER, thread_id INTEGER, message_id INTEGER,
+    tag TEXT, album TEXT, media TEXT,
+    PRIMARY KEY(channel_id, post_id, chat_id, thread_id)
+);
+CREATE INDEX IF NOT EXISTS reposts_album ON reposts(channel_id, album);
+CREATE TABLE IF NOT EXISTS channel_albums(
+    channel_id INTEGER, album TEXT, post_id INTEGER, caption INTEGER, tags TEXT, media TEXT,
+    PRIMARY KEY(channel_id, post_id)
+);
+CREATE INDEX IF NOT EXISTS channel_albums_album ON channel_albums(channel_id, album);
 CREATE TABLE IF NOT EXISTS topics(
     chat_id INTEGER, thread_id INTEGER, name TEXT,
     PRIMARY KEY(chat_id, thread_id)
@@ -273,7 +284,7 @@ class Database:
 
     # группа превратилась в супергруппу — у неё новый ID
     async def migrate(self, old, new):
-        for table in ("chats", "warns", "content", "captcha", "topics", "members", "help", "ach", "seen"):
+        for table in ("chats", "warns", "content", "captcha", "topics", "members", "help", "ach", "seen", "reposts"):
             await self.conn.execute(f"UPDATE OR REPLACE {table} SET chat_id=? WHERE chat_id=?", (new, old))
         await self.conn.commit()
         self._filters.pop(old, None)

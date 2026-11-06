@@ -17,6 +17,7 @@ import time
 from .. import achievements, antibot, menu, settings, sky, texts
 from ..db import db
 from ..settings import FIELDS, HINTS, SECTION_OF, SECTIONS
+from ..config import config
 from ..utils import can_manage, fmt_duration, is_chief, parse_duration, send_content, serialize
 from .moderation import COMMANDS, HELP
 from .achievements import NAMES as ACH_NAMES
@@ -62,6 +63,8 @@ class Form(StatesGroup):
     ach_new_desc = State()
     text_value = State()
     access_user = State()
+    post_channel = State()
+    post_tag = State()
 
 
 def btn(text: str, **kw) -> InlineKeyboardButton:
@@ -118,6 +121,16 @@ async def section_view(c: int, sec: str):
         name, typ, _ = FIELDS[k]
         rows.append([btn(f"{name}: {show(k, s[k])}", a={"bool": "tog", "enum": "cyc"}.get(typ, "inp"), c=c, k=k)])
         lines.append(f"• <b>{name}</b> — {HINTS[k]}")
+    if sec == "posts":
+        topics = {r["thread_id"]: r["name"] for r in await db.topics(c)}
+        for i, r in enumerate(s["post_rules"]):
+            place = "Общая" if not r["thread"] else topics.get(r["thread"], f"тема #{r['thread']}")
+            rows.append([btn(f"🗑 #{r['tag']} → {place} ({r['title']})"[:60], a="prd", c=c, k=str(i))])
+        rows.append([btn("➕ Добавить правило", a="pra", c=c)])
+        lines.append("\nПост с тегом из правила бот публикует в теме без звука и без закрепа. Правка на канале обновляет "
+                     "копию, а если тег убрать, копия удалится. Посты, вышедшие до появления правила, не копируются. "
+                     "Об удалении поста Telegram бота не извещает: удалённый на канале пост убери из темы вручную. "
+                     "Нажми на правило, чтобы удалить его: уже опубликованные копии останутся.")
     if sec == "ach":
         rows.append([btn("📋 Список ачивок", a="achl", c=c), btn("🗂 Темы для ачивок", a="acht", c=c)])
     rows.append([btn("« Назад", a="chat", c=c)])
@@ -417,6 +430,7 @@ async def on_help(message: Message):
 @router.callback_query(P.filter())
 async def on_button(cb: CallbackQuery, callback_data: P, state: FSMContext, bot: Bot):
     a, c, k = callback_data.a, callback_data.c, callback_data.k
+    form = await state.get_data()
     await state.clear()
     if c and not await can_manage(bot, cb.from_user.id, c):
         return await cb.answer("У тебя больше нет прав настраивать этот чат.", show_alert=True)
@@ -501,6 +515,27 @@ async def on_button(cb: CallbackQuery, callback_data: P, state: FSMContext, bot:
                                     "(если он писал в чате) или числовой ID.", reply_markup=await _cancel(c, "acc"))
             return await cb.answer()
         view = await access_view(c)
+    elif a == "pra":
+        await state.set_state(Form.post_channel)
+        await state.update_data(c=c)
+        await cb.message.answer("Сначала добавь меня админом в канал (права можно не давать), потом перешли сюда любой "
+                                "пост оттуда или отправь @username канала.", reply_markup=await _cancel(c, "sec", "posts"))
+        return await cb.answer()
+    elif a == "prd":
+        rules = list((await settings.get(c))["post_rules"])
+        if k.isdigit() and int(k) < len(rules):
+            rules.pop(int(k))
+            await settings.put(c, "post_rules", rules)
+        view = await section_view(c, "posts")
+    elif a == "prt":
+        if form.get("c") != c or not form.get("tag"):
+            return await cb.answer("Этот выбор устарел, добавь правило заново.", show_alert=True)
+        rule = {"channel": form["channel"], "title": form["title"], "tag": form["tag"], "thread": int(k),
+                "since": int(time.time())}
+        same = lambda r: (r["channel"], r["tag"], r["thread"]) == (rule["channel"], rule["tag"], rule["thread"])
+        rules = [r for r in (await settings.get(c))["post_rules"] if not same(r)] + [rule]
+        await settings.put(c, "post_rules", rules)
+        view = await section_view(c, "posts")
     elif a == "achl":
         view = await ach_list_view(c)
     elif a == "achi":
@@ -736,6 +771,52 @@ async def on_text_value(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     text, markup = await text_item_view(c, key)
     await message.answer("✅ Сохранено. Выше — как это будет выглядеть.\n\n" + text, reply_markup=markup)
+
+
+@router.message(Form.post_channel)
+async def on_post_channel(message: Message, state: FSMContext, bot: Bot):
+    data = await _form_chat(message, state, bot)
+    if not data:
+        return
+    origin = message.forward_origin
+    name = (message.text or "").strip().replace("https://t.me/", "@")
+    try:
+        if origin and origin.type == "channel":
+            channel = origin.chat
+        elif name.startswith("@"):
+            channel = await bot.get_chat(name)
+        else:
+            return await message.answer("⚠️ Перешли пост из канала или отправь @username канала.")
+        if channel.type != "channel":
+            return await message.answer("⚠️ Это не канал.")
+        me = await bot.get_chat_member(channel.id, (await bot.me()).id)
+        if me.status != "administrator":
+            return await message.answer("⚠️ Я не админ этого канала. Добавь меня и пришли пост ещё раз.")
+        who = await bot.get_chat_member(channel.id, message.from_user.id)
+    except TelegramAPIError as e:
+        return await message.answer(f"⚠️ Не вижу этот канал: {escape(e.message)}. Добавь меня туда админом и попробуй ещё раз.")
+    if message.from_user.id not in config.owners and who.status not in ("administrator", "creator"):
+        return await message.answer("⚠️ Настроить копирование может только админ этого канала.")
+    await state.update_data(channel=channel.id, title=channel.title or str(channel.id))
+    await state.set_state(Form.post_tag)
+    await message.answer(f"Канал: <b>{escape(channel.title or '')}</b>. Теперь отправь тег, например <code>#гайд</code>.",
+                         reply_markup=await _cancel(data["c"], "sec", "posts"))
+
+
+@router.message(Form.post_tag)
+async def on_post_tag(message: Message, state: FSMContext, bot: Bot):
+    data = await _form_chat(message, state, bot)
+    if not data:
+        return
+    tag = (message.text or "").strip().lstrip("#").lower()
+    if not re.fullmatch(r"\w+", tag) or tag.isdigit():
+        return await message.answer("⚠️ Нужен один тег из букв и цифр, например <code>#гайд</code>.")
+    await state.update_data(tag=tag)
+    c = data["c"]
+    topics = [(0, "Общая")] + [(r["thread_id"], r["name"]) for r in await db.topics(c)]
+    await message.answer(f"В какую тему публиковать посты с <code>#{escape(tag)}</code>? Тема появится в списке, когда в ней "
+                         "кто-нибудь напишет.", reply_markup=kb([[btn(name[:60], a="prt", c=c, k=str(tid))] for tid, name in topics]
+                                                                 + [[btn("« Отмена", a="sec", c=c, k="posts")]]))
 
 
 @router.message(Form.access_user)

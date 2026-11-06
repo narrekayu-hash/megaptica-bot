@@ -36,6 +36,21 @@ async def on_bot_status(event: ChatMemberUpdated, bot: Bot):
                 await bot.send_message(owner, text)
 
 
+@router.my_chat_member(F.chat.type == "channel")
+async def on_channel_status(event: ChatMemberUpdated, bot: Bot):
+    old, new = event.old_chat_member.status, event.new_chat_member.status
+    if new != "administrator" or old == "administrator":
+        return
+    if event.from_user.id not in config.owners:
+        with suppress(TelegramAPIError):
+            await bot.leave_chat(event.chat.id)
+        return
+    for owner in config.owners:
+        with suppress(TelegramAPIError):
+            await bot.send_message(owner, f"✅ Я админ канала <b>{escape(event.chat.title or '')}</b>. Копирование постов "
+                                          "настраивается так: /start → чат → 📣 Посты с каналов.")
+
+
 @router.message(F.migrate_to_chat_id)
 async def on_migrate(message: Message):
     await settings.migrate(message.chat.id, message.migrate_to_chat_id)
