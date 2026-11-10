@@ -16,7 +16,8 @@ ADMIN = [("ban", "Забанить"), ("unban", "Разбанить"), ("mute", 
          ("kick", "Исключить"), ("warn", "Предупреждение"), ("unwarn", "Снять предупреждение"),
          ("warns", "Сколько предупреждений"), ("del", "Удалить сообщение"), ("bot", "Спам-бот: бан, удалить всё, запомнить"), ("purge", "Удалить пачку сообщений"),
          ("timer", "Таймер в этой теме"), ("skyhere", "Напоминания Sky в эту тему"), ("helperhere", "Итоги «Помощника недели» сюда"),
-         ("ach", "Выдать ачивку (ответом на сообщение)"), ("achhere", "Поздравления с ачивками сюда"), ("help", "Справка по командам")]
+         ("ach", "Выдать ачивку (ответом на сообщение)"), ("achhere", "Поздравления с ачивками сюда"),
+         ("gameshere", "Мини-игры в эту тему"), ("help", "Справка по командам")]
 # Telegram принимает в меню только латиницу, цифры и «_»
 MENU_NAME = re.compile(r"[a-z0-9_]{1,32}")
 
@@ -37,7 +38,8 @@ async def setup(bot: Bot):
 
 SWITCH = {"events": "cmd_events", "helpers": "helpers", "achievements": "achievements", "rules": "cmd_rules",
           "notes": "cmd_notes"}
-ADMIN_SWITCH = {"bot": "spambot_cmd", "ach": "achievements", "achhere": "achievements", "helperhere": "helpers"}
+ADMIN_SWITCH = {"bot": "spambot_cmd", "ach": "achievements", "achhere": "achievements", "helperhere": "helpers",
+                "gameshere": "games"}
 
 
 async def sync_chat(bot: Bot, chat_id: int):

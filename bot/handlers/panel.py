@@ -21,6 +21,7 @@ from ..config import config
 from ..utils import can_manage, fmt_duration, is_chief, parse_duration, send_content, serialize
 from .moderation import COMMANDS, HELP
 from .achievements import NAMES as ACH_NAMES
+from .minigames import G as GameButton
 from .helpers import NAMES as HELPER_NAMES
 from .sky import NAMES as SKY_NAMES
 
@@ -133,6 +134,11 @@ async def section_view(c: int, sec: str):
                      "Нажми на правило, чтобы удалить его: уже опубликованные копии останутся.")
     if sec == "ach":
         rows.append([btn("📋 Список ачивок", a="achl", c=c), btn("🗂 Темы для ачивок", a="acht", c=c)])
+    if sec == "games":
+        rows.append([InlineKeyboardButton(text="🎲 Игры чата: собрать и запустить",
+                                          callback_data=GameButton(a="list", c=c).pack())])
+        lines.append("\nИгру запускает и ведёт тот, кто нажал «▶️ Запустить»: ему же приходят на проверку фото "
+                     "«Стоп-кадра». Если бота перезапустить посреди игры, она прервётся.")
     rows.append([btn("« Назад", a="chat", c=c)])
     return (f"<b>{title}</b>\n\n" + "\n".join(lines) +
             "\n\n✅/❌ и варианты переключаются нажатием, остальное бот попросит прислать."), kb(rows)
@@ -307,7 +313,7 @@ async def markers_view(c: int):
             f"Всего меток: {len(rows)}.{more} Если метка ловит нормальных людей, нажми на неё, чтобы удалить."), kb(buttons)
 
 
-TOPIC_CMD = {"sky_topic": "/skyhere", "ach_topic": "/achhere"}
+TOPIC_CMD = {"sky_topic": "/skyhere", "ach_topic": "/achhere", "games_topic": "/gameshere"}
 
 
 def prompt(key: str, value) -> str:
@@ -448,7 +454,7 @@ async def on_button(cb: CallbackQuery, callback_data: P, state: FSMContext, bot:
             opts = list(FIELDS[k][2])
             value = opts[(opts.index(value) + 1) % len(opts)]
         await settings.put(c, k, value)
-        if k in ("cmd_events", "cmd_rules", "cmd_notes", "cmd_custom", "helpers", "achievements", "spambot_cmd"):
+        if k in ("cmd_events", "cmd_rules", "cmd_notes", "cmd_custom", "helpers", "achievements", "spambot_cmd", "games"):
             await menu.sync_chat(bot, c)
         view = await section_view(c, SECTION_OF[k])
     elif a == "inp":
@@ -652,7 +658,8 @@ async def on_item_name(message: Message, state: FSMContext, bot: Bot):
     name = (message.text or "").strip().lower().lstrip("#/!")
     if not name or (kind != "filter" and " " in name):
         return await message.answer("Нужен текст" + (" одним словом." if kind != "filter" else "."))
-    if kind == "cmd" and (name in COMMANDS or name in SKY_NAMES or name in HELPER_NAMES or name in ACH_NAMES):
+    if kind == "cmd" and (name in COMMANDS or name in SKY_NAMES or name in HELPER_NAMES or name in ACH_NAMES
+                          or name == "gameshere"):
         return await message.answer("Это имя занято встроенной командой, выбери другое.")
     await state.update_data(name=name)
     await state.set_state(Form.item_body)
