@@ -5,7 +5,7 @@
 """
 from dataclasses import dataclass, field
 
-TYPES = {"quiz": "✨ Что я знаю о Небе? ✨", "photo": "📸 СТОП-КАДР 📸"}
+TYPES = {"quiz": "Что я знаю о Небе?", "photo": "Стоп-кадр"}  # названия новых игр, меняются в карточке
 KIND = "game"
 MAX_ROUNDS = 30
 MAX_OPTIONS = 8

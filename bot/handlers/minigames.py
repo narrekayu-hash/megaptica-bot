@@ -130,6 +130,12 @@ async def lobby_view(s: M.Session, live: bool = True):
                       InlineKeyboardButton(text=await t(c, "games.btn_leave"), callback_data=leave)]])
 
 
+def stage(s: M.Session, rnd: int) -> str:
+    """« · раунд 2 из 5» — только если раундов несколько: в игре из одного раунда слово «раунд» лишнее."""
+    total = len(s.game["rounds"])
+    return f" · раунд {rnd + 1} из {total}" if total > 1 else ""
+
+
 def round_photo(s: M.Session):
     """Картинка раунда; в игре без записи анонса нет, поэтому первый раунд берёт картинку анонса, если своей нет."""
     if s.question["photo"] or s.signup or s.round:
@@ -150,8 +156,11 @@ async def round_view(bot: Bot, s: M.Session, live: bool = True):
     limit = cfg["games_round_time"]
     # без записи анонса нет: условия и призы показываем над первым вопросом
     intro = "" if s.signup or s.round else "".join(x + "\n\n" for x in (g["about"], g["prizes"]) if x)
-    text = await t(c, "games.round", title=g["title"], round=s.round + 1, rounds=len(g["rounds"]), intro=intro,
-                   question=q["text"], answered=s.answered, total=f" / {len(s.players)}" if s.signup else "",
+    # с записью считаем всех ответивших, без записи — сколько победителей из призовых мест уже набралось
+    progress = (f"👥 Ответили: {s.answered} из {len(s.players)}" if s.signup else
+                f"🏆 Победителей: {len(s.right)} из {g['places']}")
+    text = await t(c, "games.round", title=g["title"], stage=stage(s, s.round), round=s.round + 1,
+                   rounds=len(g["rounds"]), intro=intro, question=q["text"], progress=progress,
                    timer=f"\n⏱ На раунд: {fmt_duration(limit)}" if limit else "", winners=winners)
     if g["type"] == "quiz":
         rows = [[InlineKeyboardButton(text=opt, callback_data=Ans(r=s.round, i=i).pack() if live else "noop")]
@@ -247,7 +256,8 @@ async def results_text(s: M.Session, rnd: int, rows, others) -> str:
     if others and s.signup:  # без записи «остальные» — случайные прохожие, их не перечисляем
         names = [f"• {_name(s, uid)}" for uid in others[:SHOWN_ROWS]]
         rest = "\n\n" + await t(c, "games.res_others") + "\n" + "\n".join(names)
-    return await t(c, "games.results", title=s.game["title"], round=rnd + 1, winners=winners, others=rest)
+    return await t(c, "games.results", title=s.game["title"], stage=stage(s, rnd), round=rnd + 1, winners=winners,
+                   others=rest)
 
 
 async def final_text(s: M.Session) -> str:
@@ -257,8 +267,10 @@ async def final_text(s: M.Session) -> str:
     table = [row for row in s.standings() if s.signup or row[1]]
     for i, (uid, score, seconds) in enumerate(table[:SHOWN_ROWS]):
         medal = (MEDALS[i] if i < 3 else "🏅") if i < s.game["places"] else "🎗"
+        result = (f"— очков: {score} <i>({seconds:.1f} сек)</i>" if len(s.game["rounds"]) > 1 else
+                  f"<i>({seconds:.1f} сек)</i>")
         lines.append(await t(c, "games.final_line", medal=medal, user=mention(uid, s.players[uid][:25]), score=score,
-                             time=f"{seconds:.1f}"))
+                             time=f"{seconds:.1f}", result=result))
     table = "\n".join(lines) or await t(c, "games.res_none")
     return await t(c, "games.final", title=s.game["title"], table=table)
 
