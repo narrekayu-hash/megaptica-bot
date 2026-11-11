@@ -70,16 +70,43 @@ def next_regular(key: str, now: datetime) -> datetime:
 LAND = timedelta(minutes=8, seconds=40)   # приземление после начала
 END = timedelta(hours=4)                  # конец после начала
 REALMS = ["prairie", "forest", "valley", "wasteland", "vault"]
-REALM_NAMES = {"prairie": "Daylight Prairie", "forest": "Hidden Forest", "valley": "Valley of Triumph",
-               "wasteland": "Golden Wasteland", "vault": "Vault of Knowledge"}
+# Названия как в русской версии игры (словарь Sky Studio: Base.lproj ↔ ru.lproj). В скобках — английское из sky-shards
+# и ключ строки игры; где точного ключа нет, взято ближайшее игровое название места.
+REALM_NAMES = {
+    "prairie": "Полуденная прерия",   # Daylight Prairie, name_day
+    "forest": "Тайный лес",           # Hidden Forest, name_rain
+    "valley": "Долина триумфа",       # Valley of Triumph, name_sunset
+    "wasteland": "Золотая пустошь",   # Golden Wasteland, name_dusk
+    "vault": "Хранилище знаний",      # Vault of Knowledge, name_night
+}
 MAP_NAMES = {
-    "prairie.butterfly": "Butterfly Field", "prairie.village": "Village Islands", "prairie.cave": "Cave",
-    "prairie.bird": "Bird Nest", "prairie.island": "Sanctuary Island", "forest.brook": "Forest Brook",
-    "forest.boneyard": "Boneyard", "forest.end": "Forest Garden", "forest.tree": "Treehouse",
-    "forest.sunny": "Elevated Clearing", "valley.rink": "Ice Rink", "valley.dreams": "Village of Dreams",
-    "valley.hermit": "Hermit Valley", "wasteland.temple": "Broken Temple", "wasteland.battlefield": "Battlefield",
-    "wasteland.graveyard": "Graveyard", "wasteland.crab": "Crabfield", "wasteland.ark": "Forgotten Ark",
-    "vault.starlight": "Starlight Desert", "vault.jelly": "Jellyfish Cove",
+    "prairie.butterfly": "Поле бабочек",       # Butterfly Field, title_prairie_butterflyfields_01
+    "prairie.village": "Деревня Прерии",       # Village Islands, title_prairie_village
+    "prairie.cave": "Пещера в Прерии",         # Cave, name_prairie_cave
+    "prairie.bird": "Птичье гнездо",           # Bird Nest, name_prairie_nestandkeeper
+    "prairie.island": "Острова укрытия",       # Sanctuary Island, title_prairie_island_01
+    "forest.brook": "Лесной ручей",            # Forest Brook, name_rainforest
+    "forest.boneyard": "Могильник",            # Boneyard, name_rainmid
+    "forest.end": "Храм леса",                 # Forest Garden, title_rainend_01
+    "forest.tree": "Домик на дереве",          # Treehouse, title_rain_basecamp_01
+    "forest.sunny": "Поляна",                  # Elevated Clearing, name_rainshelter
+    "valley.rink": "Замёрзшее озеро",          # Ice Rink, title_sunset_01 (каток — sunset_ice_rink)
+    "valley.dreams": "Деревушка Мечтаний",     # Village of Dreams, title_sunsetvillage_01
+    "valley.hermit": "Долина Отшельника",      # Hermit Valley, title_yetipark_01
+    "wasteland.temple": "Развалины храма",     # Broken Temple, daily_quest_meditate_dusk_main_desc
+    "wasteland.battlefield": "Поле боя",       # Battlefield, title_duskmid_01
+    "wasteland.graveyard": "Кладбище",         # Graveyard, name_duskgraveyard
+    "wasteland.crab": "Крабовые поля",         # Crabfield, name_duskcrabfield
+    "wasteland.ark": "Забытый ковчег",         # Forgotten Ark, title_oasis_01
+    "vault.starlight": "Звездная пустыня",     # Starlight Desert, title_nightdesert_01
+    "vault.jelly": "Бухта медуз",              # Jellyfish Cove, name_nightdesert_beach
+}
+# Места, где игровое название сбивает с толку: вместо «королевство · место» показываем, как туда добраться
+PLACE_HINTS = {
+    "wasteland.temple": "первая локация Золотой Пустоши",
+    "prairie.village": "перед Храмом Полуденной Прерии",
+    "forest.end": "за Храмом Леса",
+    "valley.rink": "на катке в Долине Триумфа",
 }
 # (дни недели без осколков: 1 — пн … 7 — вс, интервал, смещение от полуночи, карты по королевствам, награда)
 SHARD_GROUPS = [
@@ -109,7 +136,7 @@ class Shard:
 
     @property
     def place(self) -> str:
-        return f"{REALM_NAMES[self.realm]} · {MAP_NAMES[self.map]}"
+        return PLACE_HINTS.get(self.map) or f"{REALM_NAMES[self.realm]} · {MAP_NAMES[self.map]}"
 
 
 def shard_for_day(day: date) -> Shard:
