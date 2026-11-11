@@ -16,7 +16,12 @@ NUMBERS = {"need": (1, 200), "places": (1, 50)}
 
 def new_game(kind: str) -> dict:
     return {"type": kind, "title": TYPES[kind], "about": "", "photo": None, "prizes": "", "places": 3, "need": 3,
-            "retries": True, "rounds": []}
+            "retries": True, "signup": kind == "quiz", "rounds": []}
+
+
+def signup(game: dict) -> bool:
+    """Нужна ли запись перед игрой. Без записи сразу публикуется первый раунд, и играть может любой."""
+    return game.get("signup", game["type"] == "quiz")  # игры, собранные до появления настройки
 
 
 def parse_options(raw: str) -> list:
@@ -59,6 +64,16 @@ class Session:
         return "left" if self.players.pop(uid, None) else "not_in"
 
     @property
+    def signup(self) -> bool:
+        return signup(self.game)
+
+    def enter(self, uid: int, name: str):
+        """Игра без записи: человек становится игроком, когда впервые отвечает."""
+        if self.state == "round" and not self.signup and uid not in self.players:
+            self.players[uid] = name
+            self.scores[uid] = [0, 0.0]
+
+    @property
     def full(self) -> bool:
         return len(self.players) >= self.game["need"]
 
@@ -77,7 +92,11 @@ class Session:
 
     @property
     def complete(self) -> bool:
-        return self.answered >= len(self.players)
+        """С записью — ответили все записавшиеся. Без записи сколько будет игроков, заранее неизвестно, поэтому
+        раунд закрывается, когда верно ответило столько, сколько призовых мест."""
+        if self.signup:
+            return self.answered >= len(self.players)
+        return len(self.right) >= self.game["places"]
 
     def open(self, now: float):
         """Начинает следующий раунд."""

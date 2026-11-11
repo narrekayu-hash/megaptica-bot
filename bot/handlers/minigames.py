@@ -130,8 +130,15 @@ async def lobby_view(s: M.Session, live: bool = True):
                       InlineKeyboardButton(text=await t(c, "games.btn_leave"), callback_data=leave)]])
 
 
+def round_photo(s: M.Session):
+    """Картинка раунда; в игре без записи анонса нет, поэтому первый раунд берёт картинку анонса, если своей нет."""
+    if s.question["photo"] or s.signup or s.round:
+        return s.question["photo"]
+    return s.game["photo"]
+
+
 async def round_view(bot: Bot, s: M.Session, live: bool = True):
-    c, q = s.chat_id, s.question
+    c, q, g = s.chat_id, s.question, s.game
     cfg = await settings.get(c)
     winners = ""
     if cfg["games_show_winners"] and s.right:
@@ -141,10 +148,12 @@ async def round_view(bot: Bot, s: M.Session, live: bool = True):
             lines.append(f"…и ещё {len(order) - SHOWN_WINNERS}")
         winners = "\n\n" + await t(c, "games.winners") + "\n" + "\n".join(lines)
     limit = cfg["games_round_time"]
-    text = await t(c, "games.round", title=s.game["title"], round=s.round + 1, rounds=len(s.game["rounds"]),
-                   question=q["text"], answered=s.answered, total=len(s.players),
+    # без записи анонса нет: условия и призы показываем над первым вопросом
+    intro = "" if s.signup or s.round else "".join(x + "\n\n" for x in (g["about"], g["prizes"]) if x)
+    text = await t(c, "games.round", title=g["title"], round=s.round + 1, rounds=len(g["rounds"]), intro=intro,
+                   question=q["text"], answered=s.answered, total=f" / {len(s.players)}" if s.signup else "",
                    timer=f"\n⏱ На раунд: {fmt_duration(limit)}" if limit else "", winners=winners)
-    if s.game["type"] == "quiz":
+    if g["type"] == "quiz":
         rows = [[InlineKeyboardButton(text=opt, callback_data=Ans(r=s.round, i=i).pack() if live else "noop")]
                 for i, opt in enumerate(q["options"])]
     elif live:
@@ -164,11 +173,15 @@ def _alive(s: M.Session) -> bool:
 async def launch(bot: Bot, c: int, game_id: int, game: dict, host: int, topic: str) -> bool:
     s = M.Session(chat_id=c, game_id=game_id, game=game, host=host, thread=int(topic) or None)
     _sessions[c] = s
-    text, markup = await lobby_view(s)
-    if not await _post(bot, s, text, game["photo"], markup):
+    if s.signup:
+        text, markup = await lobby_view(s)
+        posted = await _post(bot, s, text, game["photo"], markup)
+    else:
+        s.state = "pause"
+        posted = await next_round(bot, s)
+    if not posted:
         del _sessions[c]
-        return False
-    return True
+    return posted
 
 
 async def begin(bot: Bot, s: M.Session):
@@ -184,10 +197,12 @@ async def begin(bot: Bot, s: M.Session):
 async def next_round(bot: Bot, s: M.Session):
     s.open(time.time())
     text, markup = await round_view(bot, s)
-    await _post(bot, s, text, s.question["photo"], markup)
+    if not await _post(bot, s, text, round_photo(s), markup):
+        return False
     limit = (await settings.get(s.chat_id))["games_round_time"]
     if limit:
         later(limit, end_round(bot, s, s.round))
+    return True
 
 
 async def end_round(bot: Bot, s: M.Session, rnd: int):
@@ -197,7 +212,11 @@ async def end_round(bot: Bot, s: M.Session, rnd: int):
     s.state = "pause"  # сразу, чтобы два вызова подряд не подвели итоги дважды
     c = s.chat_id
     cfg = await settings.get(c)
+    late = list(s.pending)  # «Стоп-кадр»: фото, которые ведущий не успел проверить, уже не засчитаются
     rows, others = s.close(cfg["games_first_bonus"])
+    for uid in late:
+        with suppress(TelegramAPIError):
+            await bot.send_message(uid, await t(c, "games.photo_late"))
     if cfg["games_cleanup"]:
         await _drop_post(bot, s)
     else:
@@ -209,7 +228,7 @@ async def end_round(bot: Bot, s: M.Session, rnd: int):
     else:
         winners = await t(c, "games.res_none")
     rest = ""
-    if others:
+    if others and s.signup:  # без записи «остальные» — случайные прохожие, их не перечисляем
         names = [f"• {_name(s, uid)}" for uid in others[:SHOWN_ROWS]]
         rest = "\n\n" + await t(c, "games.res_others") + "\n" + "\n".join(names)
     await _send(bot, s, await t(c, "games.results", title=s.game["title"], round=rnd + 1, winners=winners, others=rest))
@@ -230,11 +249,14 @@ async def finish(bot: Bot, s: M.Session):
     s.state = "done"
     _sessions.pop(c, None)
     lines = []
-    for i, (uid, score, seconds) in enumerate(s.standings()[:SHOWN_ROWS]):
+    # без записи в таблице только те, кто набрал очки: остальные просто нажимали кнопку
+    table = [row for row in s.standings() if s.signup or row[1]]
+    for i, (uid, score, seconds) in enumerate(table[:SHOWN_ROWS]):
         medal = (MEDALS[i] if i < 3 else "🏅") if i < s.game["places"] else "🎗"
         lines.append(await t(c, "games.final_line", medal=medal, user=mention(uid, s.players[uid][:25]), score=score,
                              time=f"{seconds:.1f}"))
-    await _send(bot, s, await t(c, "games.final", title=s.game["title"], table="\n".join(lines)))
+    table = "\n".join(lines) or await t(c, "games.res_none")
+    await _send(bot, s, await t(c, "games.final", title=s.game["title"], table=table))
     with suppress(TelegramAPIError):
         await bot.send_message(s.host, f"✅ Игра «{s.game['title']}» завершена, итоги опубликованы.")
 
@@ -282,6 +304,7 @@ async def on_answer(cb: CallbackQuery, callback_data: Ans, bot: Bot):
     s = _sessions.get(c)
     if not s or s.game["type"] != "quiz" or (callback_data.r == s.round and cb.message.message_id != s.post_id):
         return await cb.answer(await t(c, "games.over"), show_alert=True)
+    s.enter(cb.from_user.id, cb.from_user.full_name)
     result = s.answer(cb.from_user.id, callback_data.r, callback_data.i, time.time())
     await cb.answer(await t(c, f"games.{result}"), show_alert=True)
     if result in ("right", "wrong"):
@@ -293,6 +316,8 @@ async def on_answer(cb: CallbackQuery, callback_data: Ans, bot: Bot):
 async def on_photo_link(message: Message, command: CommandObject):
     c, rnd = map(int, command.args[2:].split("_"))
     s = _sessions.get(c)
+    if s and s.game["type"] == "photo" and rnd == s.round:
+        s.enter(message.from_user.id, message.from_user.full_name)
     result = s.want_photo(message.from_user.id, rnd) if s and s.game["type"] == "photo" else "over"
     c = c if s else 0  # номер чата из чужой ссылки может быть любым — настройки для него не заводим
     if result in ("ask", "pending"):
@@ -415,8 +440,12 @@ async def card_view(c: int, game_id: int):
     if g is None:
         return await list_view(c)
     quiz = g["type"] == "quiz"
-    lines = [f"<b>{g['title']}</b>", f"Вид: {KIND_NAMES[g['type']]}.",
-             f"Старт, когда соберётся игроков: {g['need']}. Призовых мест: {g['places']}.",
+    signup = M.signup(g)
+    start = (f"Запись перед игрой: да, старт, когда соберётся игроков: {g['need']}." if signup else
+             "Запись перед игрой: нет. Сразу публикуется первый раунд с условиями и призами, играть может любой. "
+             f"Раунд закончится, когда верно ответят {g['places']} (сколько призовых мест), по «Времени на раунд» "
+             "из раздела «🎲 Мини-игры» или по кнопке ведущего «Завершить раунд».")
+    lines = [f"<b>{g['title']}</b>", f"Вид: {KIND_NAMES[g['type']]}.", start, f"Призовых мест: {g['places']}.",
              "При ошибке: " + ("можно пробовать ещё" if g["retries"] else "игрок выбывает из раунда без очков") + ".",
              f"Условия: {_short(g['about'], 60) if g['about'] else 'нет'}",
              f"Призы: {_short(g['prizes'], 60) if g['prizes'] else 'нет'}",
@@ -429,7 +458,8 @@ async def card_view(c: int, game_id: int):
                      "выключи попытки.</i>")
     e = EDITABLE.index
     rows = [[btn("✏️ Название", a="edit", c=c, i=game_id, r=e("title")),
-             btn(f"👥 Игроков: {g['need']}", a="edit", c=c, i=game_id, r=e("need"))],
+             btn(f"📝 Запись: {'✅' if signup else '❌'}", a="sig", c=c, i=game_id)],
+            *([[btn(f"👥 Игроков для старта: {g['need']}", a="edit", c=c, i=game_id, r=e("need"))]] if signup else []),
             [btn(f"🏆 Призовых мест: {g['places']}", a="edit", c=c, i=game_id, r=e("places")),
              btn(f"🔁 Попытки: {'✅' if g['retries'] else '❌'}", a="tog", c=c, i=game_id)],
             [btn("📝 Условия", a="edit", c=c, i=game_id, r=e("about")),
@@ -454,7 +484,11 @@ async def live_view(c: int):
                      "или по кнопке «Начать сейчас».")
         rows = [[btn("▶️ Начать сейчас", a="go", c=c)], [btn("⏹ Отменить игру", a="stop", c=c)]]
     else:
-        lines.append(f"Раунд {s.round + 1} из {len(s.game['rounds'])}. Ответили: {s.answered} из {len(s.players)}.")
+        total = f" из {len(s.players)}" if s.signup else ""
+        lines.append(f"Раунд {s.round + 1} из {len(s.game['rounds'])}. Ответили: {s.answered}{total}.")
+        if not s.signup:
+            lines.append(f"Игра без записи: раунд закончится, когда наберётся победителей: {s.game['places']} "
+                         f"(сейчас {len(s.right)}), по таймеру или по кнопке «Завершить раунд».")
         if s.pending:
             lines.append(f"Фото ждут твоей проверки: {len(s.pending)}. Непроверенные к концу раунда не засчитаются.")
         rows = [[btn("⏭ Завершить раунд", a="skip", c=c)], [btn("⏹ Остановить игру", a="stop", c=c)]]
@@ -465,12 +499,14 @@ async def live_view(c: int):
 async def preview(bot: Bot, uid: int, c: int, game_id: int, g: dict):
     """Показывает админу в личке анонс и все раунды так, как их увидит чат (кнопки не работают)."""
     s = M.Session(chat_id=c, game_id=game_id, game=g, host=uid, thread=None)
-    text, markup = await lobby_view(s, live=False)
-    views = [(g["photo"], text, markup)]
+    views = []
+    if s.signup:
+        text, markup = await lobby_view(s, live=False)
+        views.append((g["photo"], text, markup))
     for n in range(len(g["rounds"])):
         s.round = n
         text, markup = await round_view(bot, s, live=False)
-        views.append((g["rounds"][n]["photo"], text, markup))
+        views.append((round_photo(s), text, markup))
     for photo, text, markup in views:
         if photo:
             await bot.send_photo(uid, photo, caption=text, reply_markup=markup)
@@ -486,7 +522,7 @@ async def on_button(cb: CallbackQuery, callback_data: G, state: FSMContext, bot:
         return await cb.answer("У тебя больше нет прав настраивать этот чат.", show_alert=True)
     s = _sessions.get(c)
     name, g = await _load(c, i) if i else (None, None)
-    if g is None and a in ("card", "tog", "edit", "radd", "rdel", "prev", "del", "del2", "run"):
+    if g is None and a in ("card", "tog", "sig", "edit", "radd", "rdel", "prev", "del", "del2", "run"):
         with suppress(TelegramAPIError):
             await cb.answer("Этой игры уже нет.", show_alert=True)
         a = "list"
@@ -500,8 +536,11 @@ async def on_button(cb: CallbackQuery, callback_data: G, state: FSMContext, bot:
         view = await card_view(c, (await db.content_get(c, M.KIND, name))["id"])
     elif a == "card":
         view = await card_view(c, i)
-    elif a == "tog":
-        g["retries"] = not g["retries"]
+    elif a in ("tog", "sig"):
+        if a == "tog":
+            g["retries"] = not g["retries"]
+        else:
+            g["signup"] = not M.signup(g)
         await db.content_set(c, M.KIND, name, g)
         view = await card_view(c, i)
     elif a == "edit":
