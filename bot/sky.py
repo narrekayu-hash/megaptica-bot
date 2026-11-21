@@ -180,6 +180,17 @@ def clock(dt: datetime, tz: str) -> str:
     return dt.astimezone(ZoneInfo(tz)).strftime("%H:%M")
 
 
+def reminder_clock(dt: datetime, tz: str) -> str:
+    """Время напоминания: локальное для пользователя Telegram, с явным поясом в запасном тексте."""
+    local = dt.astimezone(ZoneInfo(tz))
+    if tz == "Europe/Moscow":
+        zone = "МСК"
+    else:
+        offset = local.strftime("%z")
+        zone = f"UTC{offset[:3]}:{offset[3:]}" if offset else tz
+    return f'<tg-time unix="{int(dt.timestamp())}" format="t">{local:%H:%M} ({zone})</tg-time>'
+
+
 WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 
 

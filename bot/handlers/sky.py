@@ -56,9 +56,10 @@ async def reminder_text(chat_id: int, key: str, start: datetime, info, now: date
         color = "🔴 красный" if info.red else "⚫ чёрный"
         reward = f", вознесённых свечей: {info.reward:g}" if info.reward else ""
         return await t(chat_id, "sky.shard", left=left, color=color, place=info.place, reward=reward,
-                       start=sky.clock(start, tz), land=sky.clock(land, tz))
+                       start=sky.reminder_clock(start, tz), land=sky.reminder_clock(land, tz))
     name, emoji, _, _ = sky.REGULAR[key]
-    return await t(chat_id, "sky.event", left=left, emoji=emoji, event=name, time=sky.clock(start, tz))
+    return await t(chat_id, "sky.event", left=left, emoji=emoji, event=name,
+                   time=sky.reminder_clock(start, tz))
 
 
 _sent = {}  # (чат, событие, начало) -> когда отправили; чтобы не повторяться
@@ -81,7 +82,16 @@ async def tick(bot: Bot, now: datetime):
             except TelegramAPIError as e:
                 logger.warning("Не удалось отправить напоминание Sky в %s: %s", chat_id, e)
                 continue
-            if s["sky_cleanup"]:  # убираем напоминание, когда событие уже идёт, чтобы тема не копила их
+            if key == "shard":
+                previous = await db.one("SELECT message_id FROM sky_shard_reminders WHERE chat_id=?", chat_id)
+                await db.execute("INSERT OR REPLACE INTO sky_shard_reminders(chat_id, message_id) VALUES(?, ?)",
+                                 chat_id, msg.message_id)
+                if s["sky_cleanup"] and previous:
+                    try:
+                        await bot.delete_message(chat_id, previous["message_id"])
+                    except TelegramAPIError as e:
+                        logger.info("Не удалось удалить предыдущее напоминание об осколке в %s: %s", chat_id, e)
+            elif s["sky_cleanup"]:  # обычные события убираем через 15 минут после начала
                 later((start - now).total_seconds() + 15 * 60, msg.delete())
     for mark, sent_at in list(_sent.items()):
         if now - sent_at > timedelta(days=1):

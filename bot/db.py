@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS topics(
     chat_id INTEGER, thread_id INTEGER, name TEXT,
     PRIMARY KEY(chat_id, thread_id)
 );
+CREATE TABLE IF NOT EXISTS sky_shard_reminders(
+    chat_id INTEGER PRIMARY KEY,
+    message_id INTEGER NOT NULL
+);
 """
 
 
