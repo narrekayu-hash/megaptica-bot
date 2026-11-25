@@ -19,6 +19,18 @@ logger = logging.getLogger(__name__)
 NAMES = {"events": "events", "события": "events", "sky": "events", "skyhere": "here"}
 
 
+SHARD_FALL = datetime(2026, 11, 25, 9, 48, tzinfo=timezone.utc)
+SHARD_NOTICE_UNTIL = datetime(2026, 11, 25, 21, 0, tzinfo=timezone.utc)  # полночь по Москве
+SHARD_NOTICE_KEY = "sky_shard_fall_2026_11_25_sent"
+
+
+def observed_shard_notice(now: datetime, tz: str) -> str:
+    if not SHARD_FALL <= now < SHARD_NOTICE_UNTIL:
+        return ""
+    when = sky.reminder_clock(SHARD_FALL, tz)
+    return f"🔴 Красный осколок уже упал в Бухте медуз (Хранилище знаний) в {when}."
+
+
 class SkyCmd(Filter):
     async def __call__(self, message: Message, bot: Bot):
         text = message.text or ""
@@ -45,7 +57,12 @@ async def on_sky(message: Message, bot: Bot, sky_cmd: str, args: str):
         return await message.reply(await t(chat.id, "sky.here"))
     if not (await settings.get(chat.id))["cmd_events"]:
         return
-    text = sky.overview(datetime.now(timezone.utc), (await settings.get(chat.id))["sky_tz"])
+    now = datetime.now(timezone.utc)
+    tz = (await settings.get(chat.id))["sky_tz"]
+    text = sky.overview(now, tz)
+    notice = observed_shard_notice(now, tz)
+    if notice:
+        text += f"\n\n<b>Подтверждённое падение 25 ноября</b>\n{notice}\nОстальные часы — прогноз."
     await answer_privately(bot, message, json.dumps({"kind": "text", "text": text}), f"sky{chat.id}")
 
 
@@ -71,6 +88,15 @@ async def tick(bot: Bot, now: datetime):
         s = await settings.get(chat_id)
         if s["sky_topic"] is None:
             continue
+        if s["sky_shard"] and not s.get(SHARD_NOTICE_KEY):
+            notice = observed_shard_notice(now, s["sky_tz"])
+            if notice:
+                try:
+                    await bot.send_message(chat_id, notice, message_thread_id=int(s["sky_topic"]) or None)
+                except TelegramAPIError as e:
+                    logger.warning("Не удалось отправить уточнение по осколку в %s: %s", chat_id, e)
+                else:
+                    await settings.put(chat_id, SHARD_NOTICE_KEY, True)
         for key, start, info in sky.upcoming(now, timedelta(minutes=s["sky_before"])):
             mark = (chat_id, key, int(start.timestamp()))
             if not s[f"sky_{key}"] or mark in _sent:
