@@ -151,7 +151,15 @@ def shard_for_day(day: date) -> Shard:
     # в воскресенье перехода на летнее/зимнее время оригинал сдвигает начало на час
     if wd == 7 and bool(midnight.dst()) != bool(first.astimezone(SKY_TZ).dst()):
         first += timedelta(hours=-1 if first.astimezone(SKY_TZ).dst() else 1)
-    occ = [(s, s + LAND, s + END) for s in (first + interval * i for i in range(3))]
+    if day == date(2026, 11, 25):
+        # Начинаем от падения, которое видели в игре в 12:48 МСК.
+        landing = datetime(2026, 11, 25, 9, 48, tzinfo=timezone.utc)
+        occ = []
+        for i in range(3):
+            land = landing + interval * i
+            occ.append((land - LAND, land, land + END))
+    else:
+        occ = [(s, s + LAND, s + END) for s in (first + interval * i for i in range(3))]
     return Shard(day, wd not in no_days, red, REALMS[realm_idx], shard_map,
                  REWARD_OVERRIDE.get(shard_map, reward) if red else None, occ)
 
